@@ -20,7 +20,6 @@ from telemetry.repository import TelemetryRepository
 from twin.repository import HealthSnapshotRepository
 from twin.service import DigitalTwinService
 from twin.schemas import MLPrediction
-from telemetry.schemas import TelemetryCreate
 
 router = APIRouter()
 
@@ -101,41 +100,14 @@ def dashboard(
                 "oil_temperature": t.oil_temperature,
                 "fuel_flow": t.fuel_flow,
                 "vibration": t.vibration,
+                "throttle": t.throttle,
+                "engine_load": t.engine_load,
+                "altitude": t.altitude,
+                "ambient_temperature": t.ambient_temperature,
             }
             for t in window
         ]
         ml_prediction = twin_service.predictor.predict(telemetry_window)
-
-        current_health = (
-            health.overall
-            if health is not None
-            else twin_service.calculate_health(
-                telemetry=TelemetryCreate(
-                    timestamp=window[-1].time,
-                    engine_id=engine_id,
-                    mission_id=mission_id,
-                    rpm=window[-1].rpm,
-                    torque=window[-1].torque,
-                    cht=window[-1].cht,
-                    egt=window[-1].egt,
-                    oil_pressure=window[-1].oil_pressure,
-                    oil_temperature=window[-1].oil_temperature,
-                    fuel_flow=window[-1].fuel_flow,
-                    vibration=window[-1].vibration,
-                )
-            ).overall
-        )
-
-        rul_hours = twin_service.estimate_rul(
-            session,
-            engine_id,
-            mission_id,
-            current_health,
-        )
-
-        ml_prediction = ml_prediction.model_copy(
-            update={"rul_hours": rul_hours}
-        )
 
     prediction = PredictionResponse(
         anomaly_score=ml_prediction.anomaly_score,

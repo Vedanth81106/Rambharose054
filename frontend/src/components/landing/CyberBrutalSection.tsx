@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Radio } from "lucide-react";
+import { Radio, ArrowUpRight } from "lucide-react";
 import DroneRadarGraphic from "./DroneRadarGraphic";
+import { Link } from "react-router-dom";
 
 function useClock(): Date {
     const [t, setT] = useState<Date>(new Date());
@@ -34,16 +35,16 @@ export default function CyberBrutalSection({ onViewTwin, onScrollToDrone, onScro
             <div className="relative z-10 flex items-center justify-between px-6 md:px-10 py-5 border-b" style={{ borderColor: "#3a3a3a" }}>
                 <div className="flex items-center gap-2">
                     <span style={{ background: "#C6FF3D" }} className="w-3 h-3 inline-block" />
-                    <span className="tracking-tight font-bold text-xl" style={{ color: "#fff" }}>SKOPEO</span>
+                    <span className="tracking-tight font-bold text-3xl" style={{ color: "#fff" }}>SKOPEO</span>
                 </div>
-                <div className="hidden md:flex items-center gap-8 text-sm" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#d0d0d0" }}>
-                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToDrone}>overview</span>
-                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToHud}>telemetry</span>
-                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToHud}>diagnostics</span>
+                <div className="hidden md:flex items-center gap-8 text-l" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#d0d0d0" }}>
+                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToDrone}>OVERVIEW</span>
+                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToHud}>TELEMETRY</span>
+                    <span className="hover:text-white cursor-pointer transition" onClick={onScrollToHud}>DIAGNOSTICS</span>
                 </div>
                 <div className="flex items-center gap-4">
                     <span className="hidden sm:inline text-sm" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#b0b0b0" }}>
-                        {pad(time.getHours())}:{pad(time.getMinutes())}:{pad(time.getSeconds())} UTC
+                        {pad(time.getHours())}:{pad(time.getMinutes())}:{pad(time.getSeconds())}
                     </span>
                 </div>
             </div>
@@ -77,11 +78,32 @@ export default function CyberBrutalSection({ onViewTwin, onScrollToDrone, onScro
                     <div className="flex items-center gap-4">
                         <button
                             onClick={onViewTwin}
-                            style={{ background: "#C6FF3D", color: "#050505", cursor: "pointer" }}
+                            style={{
+                                background: "#C6FF3D",
+                                color: "#050505",
+                                cursor: "pointer",
+                            }}
                             className="font-bold px-8 py-4 text-base hover:brightness-110 transition"
                         >
                             VIEW LIVE TWIN
                         </button>
+
+                        <Link
+                            to="/analysis"
+                            className="
+                                flex items-center gap-2
+                                px-8 py-4
+                                text-base font-bold
+                                text-white
+                                border border-[#666]
+                                hover:border-[#C6FF3D]
+                                hover:text-[#C6FF3D]
+                                transition
+                            "
+                        >
+                            ANALYSIS
+                            <ArrowUpRight size={17} />
+                        </Link>
                     </div>
                 </div>
 

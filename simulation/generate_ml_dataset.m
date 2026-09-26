@@ -4,7 +4,7 @@ clear;
 clc;
 
 %% Model
-model_name = 'AeroPistonEngineSimulatorNewVeda';
+model_name = 'AeroPistonEngineSimulator';
 
 load_system(model_name);
 engine_params;

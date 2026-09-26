@@ -27,7 +27,7 @@ const DEFAULT_PREDICTION: PredictionData = {
     anomaly_score: 0.28,
     fault: "Misfire detected",
     confidence: 94,
-    rul_hours: 18.4,
+    rul_hours: null,
 };
 
 const DEFAULT_ALERTS: AlertData[] = [

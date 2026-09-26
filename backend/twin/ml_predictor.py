@@ -4,8 +4,10 @@ import joblib
 import numpy as np
 import tensorflow as tf
 from xgboost import XGBClassifier
+import pandas as pd
 
 from twin.ml import MLPredictor
+from twin.ml_models.rul.predictor import predict_rul
 from twin.schemas import MLPrediction
 
 
@@ -113,7 +115,7 @@ class ModelPredictor(MLPredictor):
             cht / (oil_temperature + 1e-6)
         )
 
-        xgb_features = np.array(
+        xgb_features = pd.DataFrame(
             [[
                 rpm,
                 fuel_flow,
@@ -130,15 +132,22 @@ class ModelPredictor(MLPredictor):
                 altitude,
                 ambient_temperature,
             ]],
-            dtype=np.float64,
-        )
-
-        # -------------------------------------------------------------------
-        # Autoencoder anomaly detection
-        # -------------------------------------------------------------------
-
-        input_scaled = _autoencoder_scaler.transform(
-            xgb_features
+            columns=[
+                "Signal1_RPM",
+                "Signal2_FuelFlow",
+                "Signal3_Torque",
+                "Signal4_OilTemp",
+                "Signal5_OilPressure",
+                "Signal6_CHT",
+                "Signal8_EGT",
+                "Signal9_Vibration",
+                "CHT_Above_Ambient",
+                "CHT_OilTemp_Ratio",
+                "Throttle",
+                "EngineLoad",
+                "Altitude_m",
+                "AmbientTemp_C",
+            ],
         )
 
         reconstruction = _autoencoder_model.predict(
@@ -186,18 +195,23 @@ class ModelPredictor(MLPredictor):
             if fault_id == 0
             else fault_name
         )
+        
+        rul_hours = predict_rul(
+            telemetry_window,
+        )
 
         print(
-            "[ML] "
-            f"anomaly_score={anomaly_score:.4f} "
-            f"is_anomaly={is_anomaly} "
-            f"fault={fault_name} "
-            f"confidence={confidence:.4f}"
+            # "[ML] "
+            # f"anomaly_score={anomaly_score:.4f} "
+            # f"is_anomaly={is_anomaly} "
+            # f"fault={fault_name} "
+            # f"confidence={confidence:.4f} "
+            f"rul_hours={rul_hours}"
         )
 
         return MLPrediction(
             anomaly_score=anomaly_score,
             fault=fault,
             confidence=confidence,
-            rul_hours=None,
+            rul_hours=rul_hours,
         )

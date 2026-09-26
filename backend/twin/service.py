@@ -67,21 +67,6 @@ class DigitalTwinService:
             telemetry_window,
         )
         
-        current_health = self.calculate_health(telemetry)
-
-        rul_hours = self.estimate_rul(
-            session,
-            telemetry.engine_id,
-            telemetry.mission_id,
-            current_health.overall,
-        )
-
-        prediction = prediction.model_copy(
-            update={
-                "rul_hours": rul_hours,
-            }
-        )
-
         state = self.build_state(
             telemetry,
             prediction,
@@ -272,63 +257,3 @@ class DigitalTwinService:
 
         return "NOMINAL"
     
-    def estimate_rul(
-        self,
-        session: Session,
-        engine_id: str,
-        mission_id: str,
-        current_health: float,
-    ) -> float | None:
-
-        snapshots = self.repository.get_by_engine(
-            session,
-            engine_id,
-        )
-
-        snapshots = [
-            s for s in snapshots
-            if s.mission_id == mission_id
-        ]
-
-        if len(snapshots) < 2:
-            return None
-
-        now = snapshots[-1].time
-
-        recent = [
-            s for s in snapshots
-            if (now - s.time).total_seconds() <= 60
-        ]
-
-        previous = [
-            s for s in snapshots
-            if 60 < (now - s.time).total_seconds() <= 120
-        ]
-
-        if not recent or not previous:
-            return None
-
-        recent_health = sum(
-            (s.thermal + s.combustion + s.lubrication) / 3
-            for s in recent
-        ) / len(recent)
-
-        previous_health = sum(
-            (s.thermal + s.combustion + s.lubrication) / 3
-            for s in previous
-        ) / len(previous)
-
-        degradation = previous_health - recent_health
-
-        if degradation <= 0:
-            return None
-
-        degradation_rate = degradation / (10 / 60)
-
-        failure_threshold = 60.0
-
-        rul_hours = (
-            current_health - failure_threshold
-        ) / degradation_rate
-
-        return round(max(0.0, rul_hours), 2)

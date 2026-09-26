@@ -10,14 +10,7 @@ RUN pip install \
     --retries=10 \
     -r requirements.txt
 
-COPY alembic.ini .
-
-COPY telemetry ./telemetry
-COPY twin ./twin
-COPY api ./api
-COPY ml_artifacts ./ml_artifacts
-COPY ml_models ./ml_models
-COPY entrypoint.sh .
+COPY . .
 
 ENV PYTHONPATH=/app:/app/telemetry
 

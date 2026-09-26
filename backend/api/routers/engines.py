@@ -304,13 +304,17 @@ def engine_health(
         telemetry_window = [
             {
                 "rpm": t.rpm,
-                "fuel_flow": t.fuel_flow,
-                "torque": t.torque,
-                "oil_temperature": t.oil_temperature,
-                "oil_pressure": t.oil_pressure,
                 "cht": t.cht,
                 "egt": t.egt,
+                "oil_pressure": t.oil_pressure,
+                "torque": t.torque,
+                "oil_temperature": t.oil_temperature,
+                "fuel_flow": t.fuel_flow,
                 "vibration": t.vibration,
+                "throttle": t.throttle,
+                "engine_load": t.engine_load,
+                "altitude": t.altitude,
+                "ambient_temperature": t.ambient_temperature,
             }
             for t in window
         ]
