@@ -8,6 +8,7 @@ from twin.repository import HealthSnapshotRepository
 from twin.factory import create_digital_twin_service
 from twin.ml_predictor import ModelPredictor
 from twin.schemas import MLPrediction
+import traceback
 
 POLL_INTERVAL_SECONDS = 2
 
@@ -30,6 +31,7 @@ class ConnectionManager:
 
         key = (engine_id, mission_id)
         self.connections.setdefault(key, set()).add(websocket)
+        print(f"[WS] Connected: {engine_id}/{mission_id}")
 
     def disconnect(
         self,
@@ -48,7 +50,12 @@ class ConnectionManager:
     async def run(self):
         while True:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
-            await self._poll_and_broadcast()
+
+            try:
+                await self._poll_and_broadcast()
+            except Exception:
+                print("[WS] Broadcast error:")
+                traceback.print_exc()
 
     async def _poll_and_broadcast(self):
         for key in list(self.connections.keys()):
@@ -59,6 +66,7 @@ class ConnectionManager:
                 continue
 
             payload = self._build_payload(engine_id, mission_id)
+            print(f"[WS] Broadcasting: {engine_id}/{mission_id}")
 
             if payload is None:
                 continue
@@ -155,10 +163,14 @@ class ConnectionManager:
                         "fuel_flow": t.fuel_flow,
                         "vibration": t.vibration,
                         "torque": t.torque,
+                        
+                        "throttle": t.throttle,
+                        "engine_load": t.engine_load,
+                        "altitude": t.altitude,
+                        "ambient_temperature": t.ambient_temperature,
                     }
                     for t in window
                 ]
-
                 ml_prediction = (
                     _twin_service.predictor.predict(
                         telemetry_window

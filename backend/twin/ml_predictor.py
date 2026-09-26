@@ -2,9 +2,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from xgboost import XGBClassifier
-import pandas as pd
 
 from twin.ml import MLPredictor
 from twin.ml_models.rul.predictor import predict_rul
@@ -27,7 +27,7 @@ _XGBOOST_PATH = _MODEL_DIR / "xgboost_fault_classifier_realistic.json"
 # Feature definitions
 # ---------------------------------------------------------------------------
 
-# These are the 12 raw features expected by the model.
+# Feature names used by the trained anomaly/fault models.
 FEATURES = [
     "Signal1_RPM",
     "Signal2_FuelFlow",
@@ -82,13 +82,12 @@ class ModelPredictor(MLPredictor):
         if not telemetry_window:
             raise ValueError("telemetry_window cannot be empty")
 
-        # The new model predicts from ONE telemetry sample.
-        # Backend 2 may still maintain its 60-sample window for other
-        # Digital Twin calculations.
+        # The anomaly/fault models predict from the latest telemetry sample.
+        # The RUL model uses the full telemetry window.
         telemetry = telemetry_window[-1]
 
         # -------------------------------------------------------------------
-        # Map Backend 2 telemetry -> model input
+        # Map Backend telemetry -> model input
         # -------------------------------------------------------------------
 
         rpm = telemetry["rpm"]
@@ -114,6 +113,10 @@ class ModelPredictor(MLPredictor):
         cht_oiltemp_ratio = (
             cht / (oil_temperature + 1e-6)
         )
+
+        # -------------------------------------------------------------------
+        # Build model input
+        # -------------------------------------------------------------------
 
         xgb_features = pd.DataFrame(
             [[
@@ -141,7 +144,7 @@ class ModelPredictor(MLPredictor):
                 "Signal6_CHT",
                 "Signal8_EGT",
                 "Signal9_Vibration",
-                "CHT_Above_Ambient",
+                "CHT_above_Ambient",
                 "CHT_OilTemp_Ratio",
                 "Throttle",
                 "EngineLoad",
@@ -149,6 +152,14 @@ class ModelPredictor(MLPredictor):
                 "AmbientTemp_C",
             ],
         )
+
+        input_scaled = _autoencoder_scaler.transform(
+            xgb_features
+        )
+
+        # -------------------------------------------------------------------
+        # Anomaly detection
+        # -------------------------------------------------------------------
 
         reconstruction = _autoencoder_model.predict(
             input_scaled,
@@ -195,18 +206,17 @@ class ModelPredictor(MLPredictor):
             if fault_id == 0
             else fault_name
         )
-        
+
+        # -------------------------------------------------------------------
+        # RUL prediction
+        # -------------------------------------------------------------------
+
         rul_hours = predict_rul(
             telemetry_window,
         )
 
         print(
-            # "[ML] "
-            # f"anomaly_score={anomaly_score:.4f} "
-            # f"is_anomaly={is_anomaly} "
-            # f"fault={fault_name} "
-            # f"confidence={confidence:.4f} "
-            f"rul_hours={rul_hours}"
+            f"[ML] rul_hours={rul_hours}"
         )
 
         return MLPrediction(

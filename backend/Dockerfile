@@ -4,8 +4,8 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install \
-    --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     --default-timeout=300 \
     --retries=10 \
     -r requirements.txt

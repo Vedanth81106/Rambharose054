@@ -45,6 +45,10 @@ def on_message(client, userdata, msg):
         print(f"Invalid telemetry: {error}")
         return
 
+    # ---------------------------------------------------------
+    # 1. Store telemetry in its own transaction
+    # ---------------------------------------------------------
+
     try:
         with SessionLocal.begin() as session:
             stored = service.process(
@@ -53,35 +57,48 @@ def on_message(client, userdata, msg):
                 msg.topic,
             )
 
-            if stored:
-                print(
-                    f"Telemetry stored: "
-                    f"{telemetry.engine_id}"
-                )
+        if not stored:
+            print(
+                f"Duplicate telemetry ignored: "
+                f"{telemetry.engine_id}"
+            )
+            return
 
-                state = twin_service.process(
-                    session,
-                    telemetry,
-                )
-
-                if state:
-                    print(
-                        f"Twin state: "
-                        f"{state.operating_state} "
-                        f"health={state.health.overall}"
-                    )
-
-            else:
-                print(
-                    f"Duplicate telemetry ignored: "
-                    f"{telemetry.engine_id}"
-                )
+        print(
+            f"Telemetry stored: "
+            f"{telemetry.engine_id}"
+        )
 
     except ValueError as error:
         print(f"Invalid telemetry: {error}")
+        return
 
     except Exception as error:
-        print(f"Telemetry processing failed: {error}")
+        print(f"Telemetry storage failed: {error}")
+        return
+
+    # ---------------------------------------------------------
+    # 2. Process Digital Twin separately
+    # ---------------------------------------------------------
+
+    try:
+        with SessionLocal.begin() as session:
+            state = twin_service.process(
+                session,
+                telemetry,
+            )
+
+            if state:
+                print(
+                    f"Twin state: "
+                    f"{state.operating_state} "
+                    f"health={state.health.overall}"
+                )
+
+    except Exception as error:
+        print(
+            f"Twin processing failed: {error}"
+        )
 
 
 def main():
