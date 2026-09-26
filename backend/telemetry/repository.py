@@ -24,6 +24,10 @@ class TelemetryRepository:
             oil_temperature=telemetry.oil_temperature,
             fuel_flow=telemetry.fuel_flow,
             vibration=telemetry.vibration,
+            throttle=telemetry.throttle,
+            engine_load=telemetry.engine_load,
+            altitude=telemetry.altitude,
+            ambient_temperature=telemetry.ambient_temperature,
         )
 
         statement = statement.on_conflict_do_nothing(

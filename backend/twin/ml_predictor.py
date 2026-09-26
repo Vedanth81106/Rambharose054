@@ -1,130 +1,203 @@
-"""
-ML predictor for BE-2 Digital Twin — LSTM autoencoder anomaly scoring.
-
-Architecture and feature-order details reverse-engineered from state_dict
-inspection (ML teammate did not supply a model class or training script).
-NOT confirmed by the ML team — see inline notes.
-"""
-import os
 from pathlib import Path
 
 import joblib
 import numpy as np
-import torch
-import torch.nn as nn
+import tensorflow as tf
+from xgboost import XGBClassifier
 
-from twin.schemas import MLPrediction  # adjust import path if your interface lives elsewhere
 from twin.ml import MLPredictor
+from twin.schemas import MLPrediction
 
-# --- paths -------------------------------------------------------------
-_ARTIFACT_DIR = Path(__file__).parent.parent / "ml_artifacts"
-_MODEL_PATH = _ARTIFACT_DIR / "anomaly_model.pth"
-_SCALER_PATH = _ARTIFACT_DIR / "scaler.pkl"
 
-# --- calibration constants (UNCALIBRATED GUESSES — no reference stats from ML team) ---
-# Sigmoid: anomaly_score = 1 / (1 + exp(-K * (mse - MIDPOINT)))
-# MIDPOINT is a guessed "typical healthy MSE" center point; K controls steepness.
-# These need tuning once real healthy/faulty telemetry streams are observed in the demo.
-_SIGMOID_K = 1.0
-_SIGMOID_MIDPOINT = 1.0
+# ---------------------------------------------------------------------------
+# Model paths
+# ---------------------------------------------------------------------------
 
-# Scaler was fit on 8 features; model only takes 7 (torque excluded — see handoff doc).
-_SCALER_FEATURE_ORDER = [
-    "RPM", "FuelFlow", "Torque", "OilTemperature",
-    "OilPressure", "CHT", "EGT", "Vibration",
+_MODEL_DIR = Path(__file__).parent / "ml_models" / "anomaly"
+
+_AUTOENCODER_PATH = _MODEL_DIR / "autoencoder_anomaly_model.h5"
+_SCALER_PATH = _MODEL_DIR / "autoencoder_scaler.pkl"
+_THRESHOLD_PATH = _MODEL_DIR / "autoencoder_threshold.pkl"
+_XGBOOST_PATH = _MODEL_DIR / "xgboost_fault_classifier_realistic.json"
+
+
+# ---------------------------------------------------------------------------
+# Feature definitions
+# ---------------------------------------------------------------------------
+
+# These are the 12 raw features expected by the model.
+FEATURES = [
+    "Signal1_RPM",
+    "Signal2_FuelFlow",
+    "Signal3_Torque",
+    "Signal4_OilTemp",
+    "Signal5_OilPressure",
+    "Signal6_CHT",
+    "Signal8_EGT",
+    "Signal9_Vibration",
+    "Throttle",
+    "EngineLoad",
+    "Altitude_m",
+    "AmbientTemp_C",
 ]
-_TORQUE_INDEX = _SCALER_FEATURE_ORDER.index("Torque")  # = 2
 
-# Map from scaler's feature name -> telemetry_window dict key (per twin/service.py)
-_FEATURE_TO_DICT_KEY = {
-    "RPM": "rpm",
-    "FuelFlow": "fuel_flow",
-    "Torque": "torque",
-    "OilTemperature": "oil_temperature",
-    "OilPressure": "oil_pressure",
-    "CHT": "cht",
-    "EGT": "egt",
-    "Vibration": "vibration",
+FAULT_NAMES = {
+    0: "Healthy",
+    1: "Torque Reduction",
+    2: "Overheat",
+    3: "Low Oil Pressure",
+    4: "Fuel Flow Restriction",
 }
 
 
-class AnomalyAutoencoder(nn.Module):
-    """
-    LSTM autoencoder matching the state_dict shapes in anomaly_model.pth.
-    encoder(7->64) -> to_latent(64->32) -> from_latent(32->64) -> decoder(64->64) -> output(64->7)
-    """
+# ---------------------------------------------------------------------------
+# Load models once
+# ---------------------------------------------------------------------------
 
-    def __init__(self, input_size: int = 7, hidden_size: int = 64, latent_size: int = 32):
-        super().__init__()
-        self.encoder = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True)
-        self.to_latent = nn.Linear(hidden_size, latent_size)
-        self.from_latent = nn.Linear(latent_size, hidden_size)
-        self.decoder = nn.LSTM(hidden_size, hidden_size, num_layers=1, batch_first=True)
-        self.output = nn.Linear(hidden_size, input_size)
+_autoencoder_scaler = joblib.load(_SCALER_PATH)
+_autoencoder_threshold = joblib.load(_THRESHOLD_PATH)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, seq_len, 7)
-        seq_len = x.size(1)
-        _, (h_n, _) = self.encoder(x)          # h_n: (1, batch, 64)
-        latent = self.to_latent(h_n.squeeze(0))  # (batch, 32)
-        expanded = self.from_latent(latent)      # (batch, 64)
-        decoder_input = expanded.unsqueeze(1).repeat(1, seq_len, 1)  # (batch, seq_len, 64)
-        decoder_out, _ = self.decoder(decoder_input)  # (batch, seq_len, 64)
-        reconstruction = self.output(decoder_out)     # (batch, seq_len, 7)
-        return reconstruction
+_autoencoder_model = tf.keras.models.load_model(
+    _AUTOENCODER_PATH,
+    compile=False,
+)
+
+_xgboost_model = XGBClassifier()
+_xgboost_model.load_model(_XGBOOST_PATH)
 
 
-# --- module-level singletons (loaded once at import, per existing pattern) ---
-_model = AnomalyAutoencoder()
-_state_dict = torch.load(_MODEL_PATH, map_location="cpu", weights_only=False)
-_model.load_state_dict(_state_dict)
-_model.eval()
-
-_scaler = joblib.load(_SCALER_PATH)
-
-
-def _sigmoid_score(mse: float) -> float:
-    return float(1.0 / (1.0 + np.exp(-_SIGMOID_K * (mse - _SIGMOID_MIDPOINT))))
-
+# ---------------------------------------------------------------------------
+# Predictor
+# ---------------------------------------------------------------------------
 
 class ModelPredictor(MLPredictor):
-    """Implements the MLPredictor interface (twin/ml.py) using the LSTM autoencoder."""
 
-    def predict(self, telemetry_window: list[dict]) -> MLPrediction:
-        # 1. Build (60, 8) array in scaler's exact fitted column order, mapping by key name.
-        raw = np.array(
-            [
-                [sample[_FEATURE_TO_DICT_KEY[feat]] for feat in _SCALER_FEATURE_ORDER]
-                for sample in telemetry_window
-            ],
+    def predict(
+        self,
+        telemetry_window: list[dict],
+    ) -> MLPrediction:
+
+        if not telemetry_window:
+            raise ValueError("telemetry_window cannot be empty")
+
+        # The new model predicts from ONE telemetry sample.
+        # Backend 2 may still maintain its 60-sample window for other
+        # Digital Twin calculations.
+        telemetry = telemetry_window[-1]
+
+        # -------------------------------------------------------------------
+        # Map Backend 2 telemetry -> model input
+        # -------------------------------------------------------------------
+
+        rpm = telemetry["rpm"]
+        fuel_flow = telemetry["fuel_flow"]
+        torque = telemetry["torque"]
+        oil_temperature = telemetry["oil_temperature"]
+        oil_pressure = telemetry["oil_pressure"]
+        cht = telemetry["cht"]
+        egt = telemetry["egt"]
+        vibration = telemetry["vibration"]
+
+        throttle = telemetry["throttle"]
+        engine_load = telemetry["engine_load"]
+        altitude = telemetry["altitude"]
+        ambient_temperature = telemetry["ambient_temperature"]
+
+        # -------------------------------------------------------------------
+        # Derived features used by the trained models
+        # -------------------------------------------------------------------
+
+        cht_above_ambient = cht - ambient_temperature
+
+        cht_oiltemp_ratio = (
+            cht / (oil_temperature + 1e-6)
+        )
+
+        xgb_features = np.array(
+            [[
+                rpm,
+                fuel_flow,
+                torque,
+                oil_temperature,
+                oil_pressure,
+                cht,
+                egt,
+                vibration,
+                cht_above_ambient,
+                cht_oiltemp_ratio,
+                throttle,
+                engine_load,
+                altitude,
+                ambient_temperature,
+            ]],
             dtype=np.float64,
-        )  # shape (60, 8)
+        )
 
-        # 2. Scale all 8 columns (StandardScaler requires the exact fitted feature count/order).
-        scaled = _scaler.transform(raw)  # (60, 8)
+        # -------------------------------------------------------------------
+        # Autoencoder anomaly detection
+        # -------------------------------------------------------------------
 
-        # 3. Drop Torque column (index 2) from the SCALED output -> (60, 7).
-        scaled_7 = np.delete(scaled, _TORQUE_INDEX, axis=1)
+        input_scaled = _autoencoder_scaler.transform(
+            xgb_features
+        )
 
-        # 4. To tensor, add batch dim -> (1, 60, 7)
-        input_tensor = torch.tensor(scaled_7, dtype=torch.float32).unsqueeze(0)
+        reconstruction = _autoencoder_model.predict(
+            input_scaled,
+            verbose=0,
+        )
 
-        # 5. Forward pass, no grad needed at inference.
-        with torch.no_grad():
-            reconstruction = _model(input_tensor)  # (1, 60, 7)
+        anomaly_score = float(
+            np.mean(
+                np.power(
+                    input_scaled - reconstruction,
+                    2,
+                )
+            )
+        )
 
-        # 6. Reconstruction MSE.
-        mse = torch.mean((input_tensor - reconstruction) ** 2).item()
+        is_anomaly = bool(
+            anomaly_score > _autoencoder_threshold
+        )
 
-        # 7. Sigmoid calibration -> [0, 1].
-        anomaly_score = _sigmoid_score(mse)
-        print(f"[ML] MSE={mse:.4f} anomaly_score={anomaly_score:.4f}")
+        # -------------------------------------------------------------------
+        # XGBoost fault classification
+        # -------------------------------------------------------------------
 
-        # No classifier head, no RUL head in this state_dict -> honestly None, not faked.
-        # confidence also has no basis from this model — flagged, left at 0.0.
+        fault_id = int(
+            _xgboost_model.predict(xgb_features)[0]
+        )
+
+        probabilities = _xgboost_model.predict_proba(
+            xgb_features
+        )[0]
+
+        fault_name = FAULT_NAMES.get(
+            fault_id,
+            "Unknown",
+        )
+
+        confidence = float(
+            probabilities[fault_id]
+        )
+
+        # Healthy = no fault
+        fault = (
+            None
+            if fault_id == 0
+            else fault_name
+        )
+
+        print(
+            "[ML] "
+            f"anomaly_score={anomaly_score:.4f} "
+            f"is_anomaly={is_anomaly} "
+            f"fault={fault_name} "
+            f"confidence={confidence:.4f}"
+        )
+
         return MLPrediction(
             anomaly_score=anomaly_score,
-            fault=None,
-            confidence=0.0,
+            fault=fault,
+            confidence=confidence,
             rul_hours=None,
         )

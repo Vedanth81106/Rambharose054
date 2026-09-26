@@ -21,6 +21,11 @@ class TelemetryCreate(BaseModel):
 
     fuel_flow: float
     vibration: float
+    
+    throttle: float
+    engine_load: float
+    altitude: float
+    ambient_temperature: float
 
     @field_validator("timestamp")
     @classmethod

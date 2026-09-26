@@ -35,6 +35,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
 
+    volumes:
+    - ./backend:/app
+
     environment:
       MQTT_BROKER_HOST: mosquitto
       MQTT_BROKER_PORT: 1883

@@ -69,6 +69,11 @@ class Telemetry(Base):
 
     fuel_flow: Mapped[float] = mapped_column(Float, nullable=False)
     vibration: Mapped[float] = mapped_column(Float, nullable=False)
+    
+    throttle: Mapped[float] = mapped_column(Float, nullable=False)
+    engine_load: Mapped[float] = mapped_column(Float, nullable=False)
+    altitude: Mapped[float] = mapped_column(Float, nullable=False)
+    ambient_temperature: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class IngestionEvent(Base):

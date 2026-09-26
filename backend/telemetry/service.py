@@ -80,6 +80,10 @@ class TelemetryService:
             oil_temperature=data.oil_temperature,
             fuel_flow=data.fuel_flow,
             vibration=data.vibration,
+            throttle=data.throttle,
+            engine_load=data.engine_load,
+            altitude=data.altitude,
+            ambient_temperature=data.ambient_temperature,
 
         )
 

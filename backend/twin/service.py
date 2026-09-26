@@ -55,6 +55,10 @@ class DigitalTwinService:
                 "oil_temperature": item.oil_temperature,
                 "fuel_flow": item.fuel_flow,
                 "vibration": item.vibration,
+                "throttle": item.throttle,
+                "engine_load": item.engine_load,
+                "altitude": item.altitude,
+                "ambient_temperature": item.ambient_temperature,
             }
             for item in telemetry_records
         ]
