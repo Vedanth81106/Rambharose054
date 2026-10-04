@@ -34,12 +34,29 @@ const SIGNAL_LABEL: Record<string, string> = {
     rpm_roughness: "RPM roughness",
     cht_roughness: "CHT jitter",
     vibration_rms: "vibration",
+    fuel_ratio: "fuel ratio",
+    torque_roughness: "torque roughness",
+    throttle: "throttle",
+    injection_duration: "injector pulse",
 };
 
 function formatDuration(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = Math.round(seconds % 60);
     return m > 0 ? `${m} min ${s} s` : `${s} s`;
+}
+
+// Prediction source is "<fault model>+<RUL model>" (backend/twin/predictor.py);
+// the rule-based stand-ins are labelled so a trained model is never assumed.
+const STAND_INS = ["rules", "health-trend"];
+
+function describeSource(source: string): string {
+    const [fault, rul] = source.split("+");
+    const part = (label: string, name?: string) =>
+        name
+            ? `${label} ${name.toUpperCase()} (${STAND_INS.includes(name) ? "RULE-BASED STAND-IN" : "TRAINED MODEL"})`
+            : null;
+    return [part("FAULT:", fault), part("RUL:", rul)].filter(Boolean).join(" · ");
 }
 
 function formatRul(prediction: {
@@ -670,10 +687,7 @@ export default function HudSection({
 
                                         {!noData && engineData.prediction.source && (
                                             <div className="mt-2 text-xs" style={{ color: "#666" }}>
-                                                SOURCE: {engineData.prediction.source.toUpperCase()}
-                                                {engineData.prediction.source.startsWith("rules")
-                                                    ? " (RULE-BASED STAND-IN UNTIL TRAINED MODELS ARE INTEGRATED)"
-                                                    : ""}
+                                                {describeSource(engineData.prediction.source)}
                                             </div>
                                         )}
                                     </div>

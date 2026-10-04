@@ -2,8 +2,9 @@
 
 The digital twin calls two predictors once per telemetry sample:
 
-* a FaultModel gets the latest WINDOW_SAMPLES samples and says whether the
-  engine is anomalous and which fault is developing;
+* a FaultModel gets up to RUL_HISTORY_SAMPLES samples (the stand-in uses
+  the latest WINDOW_SAMPLES) and says whether the engine is anomalous and
+  which fault is developing;
 * a RULModel gets up to RUL_HISTORY_SAMPLES samples and estimates the
   seconds until failure (backend/twin/failure.py), capped at RUL_CAP_S.
 
@@ -18,7 +19,10 @@ baseline). A trained model replaces a stand-in by implementing the same
 predict() method; see create_predictors().
 """
 
-from math import sqrt
+import json
+import logging
+from math import log2, sqrt
+from pathlib import Path
 from statistics import median
 from typing import Protocol
 
@@ -30,6 +34,8 @@ from twin.failure import (
     SUBSYSTEMS,
 )
 
+
+logger = logging.getLogger(__name__)
 
 WINDOW_SAMPLES = 60
 RUL_HISTORY_SAMPLES = 300
@@ -328,11 +334,182 @@ class HealthTrendRULModel:
         )
 
 
+class XGBoostFaultModel:
+    """Trained fault classifier (XGBoost, 10 classes) on 23 window features.
+
+    Features come from twin/fault_features.py (reconstructed; see there).
+    Test split: no missed faults, F1 0.93-1.00 except misfire (0.79).
+
+    Class probabilities are averaged over the last SMOOTH_SAMPLES samples
+    before choosing a fault: this lifts misfire F1 to 0.92 without slowing
+    detection, because single samples of combustion instability can look
+    like a misfire. Until the trained anomaly detector is usable, the
+    classifier also gives the anomaly score: log2(1 / P(healthy)), so 1.0
+    is the threshold (healthy at 50 %) and each halving of P(healthy) adds
+    1 (25 % -> 2, 12.5 % -> 3), like the stand-in's open-ended scale.
+    """
+
+    source = "xgboost-v1"
+
+    MODEL_PATH = Path(__file__).resolve().parent / "ml_models" / "fault" / "xgboost_classifier.json"
+    SMOOTH_SAMPLES = 20
+    MIN_PROBABILITY = 1e-6    # caps the anomaly score at ~20
+
+    # Features -> the signal shown as "signals behind the call".
+    FEATURE_SIGNAL = {
+        "rpm_res": "rpm", "rpm_res_smooth": "rpm", "rpm_res_diff_60s": "rpm",
+        "rpm_res_mean_60s": "rpm", "egt_res": "egt", "egt_res_diff_60s": "egt",
+        "egt_res_mean_60s": "egt", "cht_res": "cht", "cht_diff_10s": "cht",
+        "oil_press_res": "oil_pressure", "oil_press_res_diff_60s": "oil_pressure",
+        "oil_press_res_mean_60s": "oil_pressure", "oil_temp_res": "oil_temperature",
+        "battery_res": "battery_voltage", "fuel_ratio": "fuel_ratio",
+        "vibration_diff_60s": "vibration_rms", "vibration_rms": "vibration_rms",
+        "rpm_roughness": "rpm_roughness", "cht_roughness": "cht_roughness",
+        "torque_roughness": "torque_roughness", "throttle_diff_60s": "throttle",
+        "throttle": "throttle", "injection_duration": "injection_duration",
+    }
+
+    def __init__(self):
+        import xgboost as xgb
+
+        from twin import fault_features
+
+        self._xgb = xgb
+        self._features = fault_features
+        self._booster = xgb.Booster()
+        self._booster.load_model(str(self.MODEL_PATH))
+        self._booster.set_param({"nthread": 1})
+        if self._booster.feature_names != fault_features.FEATURE_COLUMNS:
+            raise ValueError("Classifier features don't match fault_features.py")
+        self._fallback = RuleFaultModel()
+
+    def predict(self, window: list[dict]) -> FaultResult:
+        import numpy as np
+        import pandas as pd
+
+        f = self._features
+        if "expected_rpm" not in window[-1]:
+            return self._fallback.predict(window)
+
+        rows = window[-(f.LOOKBACK + self.SMOOTH_SAMPLES):]
+        table = f.build_fault_features(pd.DataFrame(rows)).iloc[-self.SMOOTH_SAMPLES:]
+        matrix = self._xgb.DMatrix(table.to_numpy(dtype=np.float32), feature_names=f.FEATURE_COLUMNS)
+        probabilities = self._booster.predict(matrix).mean(axis=0)
+
+        fault_id = int(probabilities.argmax())
+        family, name = FAULTS[fault_id]
+        anomaly_score = log2(1.0 / max(float(probabilities[0]), self.MIN_PROBABILITY))
+
+        return FaultResult(
+            anomaly_score=round(anomaly_score, 3),
+            is_anomaly=fault_id != 0,
+            fault_id=fault_id,
+            fault_family=family,
+            fault=name,
+            confidence=round(float(probabilities[fault_id]), 3),
+            top_features=self._top_features(table.iloc[[-1]], fault_id) if fault_id else [],
+            source=self.source,
+        )
+
+    def _top_features(self, latest, fault_id, limit=3):
+        """Signals that pushed the latest sample toward the fault (SHAP)."""
+
+        import numpy as np
+
+        matrix = self._xgb.DMatrix(latest.to_numpy(dtype=np.float32), feature_names=self._features.FEATURE_COLUMNS)
+        contributions = self._booster.predict(matrix, pred_contribs=True)[0, fault_id, :-1]
+        by_signal = {}
+        for feature, value in zip(self._features.FEATURE_COLUMNS, contributions):
+            if value > 0:
+                signal = self.FEATURE_SIGNAL[feature]
+                by_signal[signal] = by_signal.get(signal, 0.0) + float(value)
+        total = sum(by_signal.values()) or 1.0
+        ranked = sorted(by_signal.items(), key=lambda kv: -kv[1])
+        return [(k, round(v / total, 2)) for k, v in ranked[:limit]]
+
+
+class GRURULModel:
+    """Trained RUL model: a GRU over 180 s of features, run with ONNX Runtime.
+
+    Trained by rul-model-new/rul (prepare_data.py, train.py); the features
+    come from twin/rul_features.py, the same code used for training. Test
+    split: in-horizon RMSE 118 s vs 229 s for HealthTrendRULModel.
+
+    Like the evaluation, the output is smoothed with a ~5 s exponential
+    average. To stay stateless, the last SMOOTH_SAMPLES sequences are
+    scored on every call and averaged.
+    """
+
+    source = "gru-v1"
+
+    MODEL_DIR = Path(__file__).resolve().parent / "ml_models" / "rul_gru"
+    SMOOTH_HALFLIFE_S = 5
+    SMOOTH_SAMPLES = 25       # older samples weigh < 4 % at a 5 s half-life
+
+    def __init__(self):
+        import numpy as np
+        import onnxruntime as ort
+
+        from twin import rul_features
+
+        self._np = np
+        self._features = rul_features
+        scaler = json.loads((self.MODEL_DIR / "scaler.json").read_text())
+        if scaler["feature_names"] != rul_features.FEATURE_COLUMNS:
+            raise ValueError("RUL scaler features don't match rul_features.py")
+        if scaler["sequence_length"] != rul_features.SEQ_LEN:
+            raise ValueError("RUL scaler sequence length doesn't match rul_features.py")
+        self._mean = np.array(scaler["mean"], dtype=np.float32)
+        self._std = np.array(scaler["std"], dtype=np.float32)
+
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = 1      # 1 Hz, tiny model: don't hog the CPU
+        self._session = ort.InferenceSession(
+            str(self.MODEL_DIR / "rul_gru.onnx"), options,
+            providers=["CPUExecutionProvider"],
+        )
+
+    def predict(self, history: list[dict]) -> RULResult | None:
+        import pandas as pd
+
+        np = self._np
+        f = self._features
+        # The model scores nothing before warm-up plus the rolling window,
+        # and needs the healthy baseline for its residuals.
+        if len(history) < f.WARMUP + f.ROLL or "expected_rpm" not in history[-1]:
+            return None
+
+        table = f.build_features(pd.DataFrame(history))
+        features = (table.to_numpy(dtype=np.float32) - self._mean) / self._std
+
+        last = len(features) - 1
+        ends = range(max(0, last - self.SMOOTH_SAMPLES + 1), last + 1)
+        batch = np.stack([f.sequence_ending_at(features, e) for e in ends])
+        raw = self._session.run(None, {"sequence": batch})[0] * RUL_CAP_S
+        raw = np.clip(raw, 0.0, RUL_CAP_S)
+
+        smoothed = pd.Series(raw).ewm(halflife=self.SMOOTH_HALFLIFE_S).mean()
+        return RULResult(rul_seconds=round(float(smoothed.iloc[-1])), source=self.source)
+
+
 def create_predictors() -> tuple[FaultModel, RULModel]:
     """The predictors the twin uses.
 
     Swap a stand-in for a trained model here once it is delivered (see the
     hand-back sections of ANOMALY_MODEL_GUIDE.md and RUL_MODEL_GUIDE.md).
+    Each trained model falls back to its stand-in if it can't load.
     """
 
-    return RuleFaultModel(), HealthTrendRULModel()
+    try:
+        fault_model = XGBoostFaultModel()
+    except Exception:
+        logger.exception("Trained fault model unavailable, using RuleFaultModel")
+        fault_model = RuleFaultModel()
+
+    try:
+        rul_model = GRURULModel()
+    except Exception:
+        logger.exception("Trained RUL model unavailable, using HealthTrendRULModel")
+        rul_model = HealthTrendRULModel()
+
+    return fault_model, rul_model

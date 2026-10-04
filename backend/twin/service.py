@@ -10,11 +10,14 @@ from telemetry.schemas import TelemetryCreate
 from twin import baseline
 from twin.advisory import AdvisoryEngine
 from twin.models import HealthSnapshot
+from twin.failure import FAILURE_THRESHOLD, SMOOTHING_WINDOW
 from twin.predictor import (
+    RUL_CAP_S,
     RUL_HISTORY_SAMPLES,
-    WINDOW_SAMPLES,
     FaultModel,
     RULModel,
+    RULResult,
+    engine_health,
 )
 from twin.repository import HealthSnapshotRepository
 from twin.schemas import (
@@ -215,8 +218,27 @@ class DigitalTwinService:
             expected_rows[-RUL_HISTORY_SAMPLES:] if expected_rows else None,
             health,
         )
-        fault = self.fault_model.predict(samples[-WINDOW_SAMPLES:])
+        fault = self.fault_model.predict(samples)
         rul = self.rul_model.predict(samples)
+
+        # A countdown needs a confirmed fault: on healthy flight the trained
+        # RUL model occasionally dips below the cap (3 % of healthy test
+        # samples read < 400 s), which would raise a false advisory.
+        if rul is not None and not fault.is_anomaly and rul.rul_seconds < RUL_CAP_S:
+            rul = RULResult(rul_seconds=RUL_CAP_S, source=rul.source)
+
+        # Once the failure definition is met (twin/failure.py), RUL is 0:
+        # the trained model's output only gets down to a few seconds.
+        recent = [
+            h for h in (engine_health(s) for s in samples[-SMOOTHING_WINDOW:])
+            if h is not None
+        ]
+        if (
+            rul is not None
+            and len(recent) == SMOOTHING_WINDOW
+            and sum(recent) / len(recent) < FAILURE_THRESHOLD
+        ):
+            rul = RULResult(rul_seconds=0.0, source=rul.source)
 
         prediction = MLPrediction(
             anomaly_score=fault.anomaly_score,
