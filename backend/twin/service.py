@@ -381,8 +381,10 @@ class DigitalTwinService:
         # It still drives the operating state.
         sensor = self._sensor_health(recent_cht)
 
-        # Average over the subsystems that have data, so older telemetry
-        # without electrical / injection signals is not penalised.
+        # Overall = the weakest engine subsystem with data ("weakest link"):
+        # the engine fails when its weakest subsystem does (twin/failure.py),
+        # so an average would read ~83 % with combustion at 0. Older
+        # telemetry without electrical / injection signals is not penalised.
         components = [
             score
             for score in (
@@ -396,7 +398,7 @@ class DigitalTwinService:
             if score is not None
         ]
 
-        overall = sum(components) / len(components)
+        overall = min(components)
 
         return HealthState(
             overall=round(overall, 2),

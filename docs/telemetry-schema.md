@@ -150,7 +150,7 @@ states — and therefore signals 1–9 — bit-identical to the original model.
 |---|---|
 | Database (`telemetry` table) | Stored as nullable `FLOAT` columns (migration `7c2e9a41b5d3`) |
 | ML (autoencoder, XGBoost, RUL GRU) | **No.** Models receive exactly their original feature sets |
-| Digital Twin health | `battery_voltage` + `alternator_current` → `health.electrical`; `injection_timing` + `injection_duration` → `health.injection` (median signed mismatch between the fuel flow the ECU pulse commands and the measured fuel flow, plus timing vs. the ECU map). Both rule-based and averaged into `health.overall` when present. `health.sensor` (CHT jitter) is reported but kept out of `health.overall`; every subsystem drives the operating state |
+| Digital Twin health | `battery_voltage` + `alternator_current` → `health.electrical`; `injection_timing` + `injection_duration` → `health.injection` (median signed mismatch between the fuel flow the ECU pulse commands and the measured fuel flow, plus timing vs. the ECU map). Both rule-based and part of `health.overall` (the weakest engine subsystem) when present. `health.sensor` (CHT jitter) is reported but kept out of `health.overall`; every subsystem drives the operating state |
 | API / WebSocket | Returned in every telemetry object (`latest`, dashboard, mission telemetry, replay, WebSocket) |
 
 ## Simulated faults (`Fault_ID`)

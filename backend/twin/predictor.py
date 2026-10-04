@@ -21,7 +21,7 @@ predict() method; see create_predictors().
 
 import json
 import logging
-from math import log2, sqrt
+from math import sqrt
 from pathlib import Path
 from statistics import median
 from typing import Protocol
@@ -335,78 +335,138 @@ class HealthTrendRULModel:
 
 
 class XGBoostFaultModel:
-    """Trained fault classifier (XGBoost, 10 classes) on 23 window features.
+    """Trained fault models: an XGBoost classifier (which fault) and a dense
+    autoencoder (is anything wrong), both on the 32 features of
+    twin/fault_features.py. Trained by anomaly-model-new/v2.
 
-    Features come from twin/fault_features.py (reconstructed; see there).
-    Test split: no missed faults, F1 0.93-1.00 except misfire (0.79).
-
-    Class probabilities are averaged over the last SMOOTH_SAMPLES samples
-    before choosing a fault: this lifts misfire F1 to 0.92 without slowing
-    detection, because single samples of combustion instability can look
-    like a misfire. Until the trained anomaly detector is usable, the
-    classifier also gives the anomaly score: log2(1 / P(healthy)), so 1.0
-    is the threshold (healthy at 50 %) and each halving of P(healthy) adds
-    1 (25 % -> 2, 12.5 % -> 3), like the stand-in's open-ended scale.
+    - Classifier: class probabilities averaged over SMOOTH_SAMPLES.
+    - Autoencoder: reconstruction error of the standardised features, run
+      with numpy from autoencoder.json; it alarms when `min_over` of the
+      last `window` scores exceed its threshold.
+    - Anomaly = the classifier names a fault with >= CONFIDENT probability,
+      or the autoencoder alarms. On the test split this gives 0 false alarms
+      per hour and no missed faults (classifier alone: 1.45 per hour). An
+      autoencoder alarm the classifier can't name is an unclassified anomaly.
+    - Anomaly score = the autoencoder's median score over its window divided
+      by its threshold (1.0 = threshold).
     """
 
-    source = "xgboost-v1"
+    source = "xgboost-ae-v2"
 
-    MODEL_PATH = Path(__file__).resolve().parent / "ml_models" / "fault" / "xgboost_classifier.json"
+    MODEL_DIR = Path(__file__).resolve().parent / "ml_models" / "fault"
     SMOOTH_SAMPLES = 20
-    MIN_PROBABILITY = 1e-6    # caps the anomaly score at ~20
+    CONFIDENT = 0.9
 
     # Features -> the signal shown as "signals behind the call".
     FEATURE_SIGNAL = {
         "rpm_res": "rpm", "rpm_res_smooth": "rpm", "rpm_res_diff_60s": "rpm",
-        "rpm_res_mean_60s": "rpm", "egt_res": "egt", "egt_res_diff_60s": "egt",
-        "egt_res_mean_60s": "egt", "cht_res": "cht", "cht_diff_10s": "cht",
+        "rpm_res_mean_60s": "rpm", "rpm_res_median_60s": "rpm",
+        "rpm_res_p10_60s": "rpm", "rpm_res_p90_60s": "rpm",
+        "rpm_res_std_60s": "rpm_roughness", "rpm_res_skew_60s": "rpm_roughness",
+        "rpm_dip_frac_60s": "rpm_roughness",
+        "egt_res": "egt", "egt_res_diff_60s": "egt", "egt_res_mean_60s": "egt",
+        "egt_res_median_60s": "egt", "cht_res": "cht", "cht_diff_10s": "cht",
         "oil_press_res": "oil_pressure", "oil_press_res_diff_60s": "oil_pressure",
         "oil_press_res_mean_60s": "oil_pressure", "oil_temp_res": "oil_temperature",
         "battery_res": "battery_voltage", "fuel_ratio": "fuel_ratio",
         "vibration_diff_60s": "vibration_rms", "vibration_rms": "vibration_rms",
-        "rpm_roughness": "rpm_roughness", "cht_roughness": "cht_roughness",
-        "torque_roughness": "torque_roughness", "throttle_diff_60s": "throttle",
+        "vibration_rms_30s": "vibration_rms", "rpm_roughness": "rpm_roughness",
+        "cht_roughness": "cht_roughness", "torque_roughness": "torque_roughness",
+        "torque_mean_60s": "torque", "throttle_diff_60s": "throttle",
         "throttle": "throttle", "injection_duration": "injection_duration",
     }
 
     def __init__(self):
+        import numpy as np
         import xgboost as xgb
 
         from twin import fault_features
 
+        self._np = np
         self._xgb = xgb
         self._features = fault_features
+        columns = fault_features.FEATURE_COLUMNS
+
         self._booster = xgb.Booster()
-        self._booster.load_model(str(self.MODEL_PATH))
+        self._booster.load_model(str(self.MODEL_DIR / "xgboost_classifier.json"))
         self._booster.set_param({"nthread": 1})
-        if self._booster.feature_names != fault_features.FEATURE_COLUMNS:
+        if self._booster.feature_names != columns:
             raise ValueError("Classifier features don't match fault_features.py")
+
+        ae = json.loads((self.MODEL_DIR / "autoencoder.json").read_text())
+        if ae["features"] != columns:
+            raise ValueError("Autoencoder features don't match fault_features.py")
+        self._ae_mean = np.array(ae["scaler_mean"])
+        self._ae_scale = np.array(ae["scaler_scale"])
+        self._ae_layers = [
+            (np.array(layer["kernel"]), np.array(layer["bias"]), layer["activation"] == "relu")
+            for layer in ae["layers"]
+        ]
+        self._ae_threshold = ae["threshold"]
+        self._ae_window = ae["persistence"]["window"]
+        self._ae_min_over = ae["persistence"]["min_over"]
+
+        missing = set(columns) - set(self.FEATURE_SIGNAL)
+        if missing:
+            raise ValueError(f"No display signal for features: {sorted(missing)}")
         self._fallback = RuleFaultModel()
 
+    def _autoencoder_scores(self, X):
+        np = self._np
+        z = (np.nan_to_num(X) - self._ae_mean) / self._ae_scale
+        h = z
+        for kernel, bias, relu in self._ae_layers:
+            h = h @ kernel + bias
+            if relu:
+                h = np.maximum(h, 0.0)
+        return ((z - h) ** 2).mean(axis=1)
+
     def predict(self, window: list[dict]) -> FaultResult:
-        import numpy as np
         import pandas as pd
 
+        np = self._np
         f = self._features
         if "expected_rpm" not in window[-1]:
             return self._fallback.predict(window)
 
-        rows = window[-(f.LOOKBACK + self.SMOOTH_SAMPLES):]
-        table = f.build_fault_features(pd.DataFrame(rows)).iloc[-self.SMOOTH_SAMPLES:]
-        matrix = self._xgb.DMatrix(table.to_numpy(dtype=np.float32), feature_names=f.FEATURE_COLUMNS)
-        probabilities = self._booster.predict(matrix).mean(axis=0)
+        recent = max(self.SMOOTH_SAMPLES, self._ae_window)
+        rows = window[-(f.LOOKBACK + recent):]
+        table = f.build_fault_features(pd.DataFrame(rows)).iloc[-recent:]
+        X = table.to_numpy(dtype=np.float32)
 
-        fault_id = int(probabilities.argmax())
-        family, name = FAULTS[fault_id]
-        anomaly_score = log2(1.0 / max(float(probabilities[0]), self.MIN_PROBABILITY))
+        probabilities = self._booster.predict(
+            self._xgb.DMatrix(X[-self.SMOOTH_SAMPLES:], feature_names=f.FEATURE_COLUMNS)
+        ).mean(axis=0)
+        predicted = int(probabilities.argmax())
+        classifier_alarm = predicted != 0 and probabilities[predicted] >= self.CONFIDENT
 
+        # Only rows with the full lookback: at mission start the *_diff_60s
+        # features are still undefined, which the autoencoder never saw in
+        # training (every training row had 60 s of history).
+        complete = ~np.isnan(X[-self._ae_window:]).any(axis=1)
+        scores = self._autoencoder_scores(X[-self._ae_window:][complete])
+        ae_alarm = (
+            len(scores) == self._ae_window
+            and int((scores > self._ae_threshold).sum()) >= self._ae_min_over
+        )
+
+        if classifier_alarm or (ae_alarm and predicted != 0):
+            fault_id = predicted
+            family, name = FAULTS[fault_id]
+        elif ae_alarm:
+            fault_id, family, name = None, "unclassified", EXTRA_FAMILIES["unclassified"]
+        else:
+            fault_id = 0
+            family, name = FAULTS[0]
+
+        confidence = float(probabilities[fault_id]) if fault_id is not None else 1.0 - float(probabilities[0])
         return FaultResult(
-            anomaly_score=round(anomaly_score, 3),
-            is_anomaly=fault_id != 0,
+            anomaly_score=round(float(np.median(scores)) / self._ae_threshold, 3) if len(scores) else 0.0,
+            is_anomaly=classifier_alarm or ae_alarm,
             fault_id=fault_id,
             fault_family=family,
             fault=name,
-            confidence=round(float(probabilities[fault_id]), 3),
+            confidence=round(confidence, 3),
             top_features=self._top_features(table.iloc[[-1]], fault_id) if fault_id else [],
             source=self.source,
         )
@@ -414,9 +474,9 @@ class XGBoostFaultModel:
     def _top_features(self, latest, fault_id, limit=3):
         """Signals that pushed the latest sample toward the fault (SHAP)."""
 
-        import numpy as np
-
-        matrix = self._xgb.DMatrix(latest.to_numpy(dtype=np.float32), feature_names=self._features.FEATURE_COLUMNS)
+        matrix = self._xgb.DMatrix(
+            latest.to_numpy(dtype=self._np.float32), feature_names=self._features.FEATURE_COLUMNS
+        )
         contributions = self._booster.predict(matrix, pred_contribs=True)[0, fault_id, :-1]
         by_signal = {}
         for feature, value in zip(self._features.FEATURE_COLUMNS, contributions):

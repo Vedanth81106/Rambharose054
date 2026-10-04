@@ -36,6 +36,7 @@ const SIGNAL_LABEL: Record<string, string> = {
     vibration_rms: "vibration",
     fuel_ratio: "fuel ratio",
     torque_roughness: "torque roughness",
+    torque: "torque",
     throttle: "throttle",
     injection_duration: "injector pulse",
 };
@@ -67,7 +68,7 @@ function formatRul(prediction: {
     const rul = prediction.rul_seconds;
     if (rul == null) return "N/A";
     if (rul >= 600) return "> 10 min";
-    if (rul <= 0) return "FAILURE";
+    if (rul <= 0) return "0 s (ENGINE FAILED)";
     const band =
         prediction.rul_low != null && prediction.rul_high != null
             ? ` (${formatDuration(prediction.rul_low)} – ${formatDuration(prediction.rul_high)})`
