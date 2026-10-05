@@ -154,7 +154,7 @@ It's physics-transparent and uses exactly the failure definition, so it's a fair
 
 | | Recommendation |
 |---|---|
-| Architecture | 2-layer GRU, 64–96 hidden units, dropout 0.15–0.2 → dense layer → one output. The existing class in `backend/twin/ml_models/rul/model.py` (`GRURULRegressor`: GRU → LayerNorm → 64-unit GELU layer → output) already has this shape. Reuse it with the new `n_features`, but swap its final Softplus for a sigmoid (or clamp the output to 0–1) to match the scaled target |
+| Architecture | 2-layer GRU, 64–96 hidden units, dropout 0.15–0.2 → dense layer → one output. The class in `rul-model-new/rul/model.py` (`GRURULRegressor`: GRU → LayerNorm → 64-unit GELU layer → output) has this shape and trained the live model |
 | Input | Sequence of 180–300 × N features (§5), standardised with training-set means and stds |
 | Target | `rul_seconds / 600` (0–1); output through a sigmoid, then × 600 |
 | Loss | Huber, with extra weight on rows where `rul_seconds < 600` |
@@ -209,7 +209,7 @@ The asymmetric score comes from the NASA PHM'08 prognostics challenge. Overestim
 - **Warm-up:** the first 60 s are dropped; health is not defined there.
 - **Split by run, never by row:** neighbouring windows overlap almost completely.
 - **Fixed during generation:** the first version of the labelling script started the countdown up to 10 minutes *before* the fault began. That's impossible to predict, and is now fixed (600 until onset, §4.1). Separately, eight sensor-noise sources in the Simulink model shared one seed, giving perfectly correlated noise. They now have separate seeds, and every dataset run uses its own random seeds.
-- **The old RUL pipeline is obsolete.** `ai/RUL/` and the current `rul_model.pt` were trained on an older dataset, with labels from a synthetic damage-accumulation health index (failure at HI ≤ 0.1, output in hours). Don't mix those labels with the new ones. The new label is `rul_seconds` from the shared failure definition.
+- **The old RUL pipeline (since removed)** was trained on an older dataset, with labels from a synthetic damage-accumulation health index (failure at HI ≤ 0.1, output in hours). Don't mix those labels with the new ones. The new label is `rul_seconds` from the shared failure definition.
 
 ---
 
@@ -239,4 +239,4 @@ Once per second, the backend calls `predict(history)` with the **last 300 sample
 - **Speed:** under 50 ms per call on a laptop CPU.
 - **Size:** ideally under 10 MB.
 
-The backend, API and dashboard already use seconds (`rul_seconds`, shown as "~2 min 30 s"). The old hours-based GRU in `backend/twin/ml_models/rul/` and `ml_predictor.py` is no longer loaded.
+The backend, API and dashboard already use seconds (`rul_seconds`, shown as "~2 min 30 s").

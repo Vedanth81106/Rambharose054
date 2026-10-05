@@ -467,5 +467,3 @@ Once per second, the backend calls `predict(window)` with the **last 60 samples*
 **Constraints:**
 - **Speed:** under 50 ms per call on a laptop CPU.
 - **Size:** ideally under 10 MB. Lightweight models suit onboard / edge deployment, which the PS lists as an innovation area.
-
-The current files in `backend/twin/ml_models/anomaly/`, `ml_predictor.py` and `anomalyModel/` were trained on an older 20-run dataset (faults 0–4 only, no mission profiles) and are no longer loaded by the backend. Treat them as references only.

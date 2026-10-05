@@ -65,7 +65,7 @@ r = run_telemetry_scenarios('AeroPistonEngineSimulator', 300, {'steady'}, 0:9); 
 report = check_signal_regression(baseline, candidate);      % prove a model edit left signals 1-9 bit-identical
 ```
 
-The ML dataset (`data/sim_v2/`, git-ignored) comes from `generate_sim_dataset('../data/sim_v2', seeds)` (resumable; skips runs that crash MATLAB), then `python ai/dataset/label_dataset.py data/sim_v2` and `python ai/dataset/check_dataset.py data/sim_v2`. The old `generate_ml_dataset.m` is obsolete. Long MATLAB jobs: track progress by watching output files; MCP calls silent for 30 min are aborted while MATLAB keeps running.
+The ML dataset (`data/sim_v2/`, git-ignored) comes from `generate_sim_dataset('../data/sim_v2', seeds)` (resumable; skips runs that crash MATLAB), then `python ai/dataset/label_dataset.py data/sim_v2` and `python ai/dataset/check_dataset.py data/sim_v2`. Long MATLAB jobs: track progress by watching output files; MCP calls silent for 30 min are aborted while MATLAB keeps running.
 
 ## Things that span multiple files
 
@@ -75,7 +75,7 @@ The ML dataset (`data/sim_v2/`, git-ignored) comes from `generate_sim_dataset('.
   - `GRURULModel`: `ml_models/rul_gru/` (ONNX + scaler, run with onnxruntime, no PyTorch) on `twin/rul_features.py`, an exact copy of `rul-model-new/rul/rul_features.py`, which trained it. Keep the two identical.
   - In the service, the RUL is held at the cap unless the fault model reports an anomaly (hides false countdowns), and set to 0 once the failure definition is met.
 
-  Predictions, operating state and the maintenance advisory (`backend/twin/advisory.py` + `advisory_rules.json`) are computed once per sample in the telemetry service and stored on the health snapshot; the API and WebSocket only read snapshots. Anomaly scores are normalised (1.0 = threshold); RUL is in seconds, capped at 600. `ml_predictor.py`, `ml_models/anomaly/`, `ml_models/rul/` and `anomalyModel/` are old models and are not loaded.
+  Predictions, operating state and the maintenance advisory (`backend/twin/advisory.py` + `advisory_rules.json`) are computed once per sample in the telemetry service and stored on the health snapshot; the API and WebSocket only read snapshots. Anomaly scores are normalised (1.0 = threshold); RUL is in seconds, capped at 600.
 - **Rule-based health limits in `backend/twin/service.py` mirror Simulink parameters** in `simulation/engine_params.m` (`elec.*`, `inj.*`, the injection timing map). Change both together.
 - **Faults.** `Fault_ID` 0–9 selects rows of 2-D lookup tables (fault ID × degradation) spread across the model's subsystems. Degradation ramps 0→1 over `fault_ramp_time` (300 s) from `Degradation/Fault_Onset`, so a freshly injected fault has no effect yet. The fault list and signatures are documented in `docs/telemetry-schema.md` and must be kept in sync with the valid fault IDs in `backend/api/routers/engines.py`, `simulink_mqtt_stream.m`, and the health indices.
 - **Failure definition** (`backend/twin/failure.py`): the engine has failed when the weakest engine subsystem health (sensor health excluded), averaged over 90 s, drops below 30 and stays there. RUL labels come from the same `calculate_health()` the live twin uses. The penalty scales in `backend/twin/service.py` are calibrated so every fault fails, and a healthy cruise run never does. After changing them or the fault tables, re-run a fault sweep through the health code.

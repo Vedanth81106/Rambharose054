@@ -33,7 +33,7 @@ An AI-enabled, real-time digital twin of a single-cylinder aero-piston (drone) e
 | Digital twin | `backend/twin/` | Healthy baseline, subsystem health indices, fault and RUL predictors (trained models plug into `predictor.py`; rule-based stand-ins until then), maintenance advisory, mission reports |
 | API | `backend/api/` | REST endpoints and a live WebSocket feed |
 | Dashboard | `frontend/` | Live overview, mission profile selection, maintenance advisory, efficiency index, 3D engine view, fault injection, mission analysis, replay and downloadable health reports |
-| Model training | `anomalyModel/`, `ai/RUL/`, `data/` | Training code and data for the ML models |
+| Model training | `anomaly-model-new/v2/`, `rul-model-new/rul/`, `ai/` | Training code for the fault and RUL models, the healthy-baseline fit and the dataset labelling/checks |
 
 ## Prerequisites
 
@@ -133,7 +133,7 @@ In MATLAB, from `simulation/`:
 engine_params;                                            % load model parameters
 r = run_telemetry_scenarios('AeroPistonEngineSimulator', 300);   % simulate every fault
 check_signal_regression(baseline, candidate);             % compare two model versions
-generate_ml_dataset;                                      % build the ML training dataset
+generate_sim_dataset('../data/sim_v2', seeds);            % build the ML training dataset
 ```
 
 When adding a telemetry field, update the backend schema before the simulator starts publishing it: the backend rejects unknown fields. The full checklist is in [`CLAUDE.md`](CLAUDE.md).
