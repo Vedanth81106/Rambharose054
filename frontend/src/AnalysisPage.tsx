@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowLeft, Clock3 } from "lucide-react";
+import { ArrowLeft, Clock3, Trash2 } from "lucide-react";
 import {
     getMissions,
     getMission,
@@ -26,6 +26,7 @@ import {
     weakestSubsystem,
     type SubsystemKey,
 } from "./components/analysis/missionData";
+import ResetDataDialog from "./components/analysis/ResetDataDialog";
 
 const TABS = [
     { key: "summary", label: "SUMMARY" },
@@ -65,6 +66,8 @@ export default function AnalysisPage() {
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [resetOpen, setResetOpen] = useState(false);
+    const [missionsVersion, setMissionsVersion] = useState(0);
 
     useEffect(() => {
         async function loadMissions() {
@@ -76,8 +79,12 @@ export default function AnalysisPage() {
 
                 setMissions(result.missions);
 
-                if (result.missions.length > 0 && !params.get("mission")) {
-                    setParam({ mission: result.missions[0].mission_id });
+                const current = params.get("mission");
+                if (result.missions.length === 0) {
+                    setMission(null);
+                    if (current) setParam({ mission: null, sub: null });
+                } else if (!current || !result.missions.some((m) => m.mission_id === current)) {
+                    setParam({ mission: result.missions[0].mission_id, sub: null });
                 }
             } catch (err) {
                 setError(
@@ -92,7 +99,20 @@ export default function AnalysisPage() {
 
         loadMissions();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [missionsVersion]);
+
+    // After a reset, reload the mission list; the selection moves to the
+    // newest remaining mission (or clears when none are left).
+    const onDataDeleted = () => {
+        setResetOpen(false);
+        setMission(null);
+        setTelemetry([]);
+        setReplay(null);
+        setReport(null);
+        setBaseline(null);
+        setParam({ mission: null, sub: null });
+        setMissionsVersion((v) => v + 1);
+    };
 
     useEffect(() => {
         if (!selectedMission) return;
@@ -230,6 +250,15 @@ export default function AnalysisPage() {
                 </a>
             </header>
 
+            {resetOpen && (
+                <ResetDataDialog
+                    missionId={selectedMission}
+                    missionCount={missions.length}
+                    onClose={() => setResetOpen(false)}
+                    onDeleted={onDataDeleted}
+                />
+            )}
+
             <main className="px-6 md:px-10 py-8">
                 {/* Page heading */}
                 <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5 mb-8">
@@ -289,6 +318,19 @@ export default function AnalysisPage() {
                                 </option>
                             ))}
                         </select>
+
+                        <button
+                            onClick={() => setResetOpen(true)}
+                            className="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-white/10"
+                            style={{
+                                border: "1px solid #e8543f",
+                                color: "#e8543f",
+                                fontFamily: "'JetBrains Mono', monospace",
+                            }}
+                        >
+                            <Trash2 size={14} />
+                            RESET DATA
+                        </button>
                     </div>
                 </div>
 

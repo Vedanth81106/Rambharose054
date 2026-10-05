@@ -115,6 +115,22 @@ export async function getMissions(): Promise<{
     return request<{ missions: MissionItem[] }>("/missions");
 }
 
+// Permanently deletes a mission's telemetry, health snapshots and ingestion
+// events. The backend refuses while that mission is being simulated.
+export async function deleteMission(
+    missionId: string
+): Promise<{ deleted_missions: number }> {
+    return request<{ deleted_missions: number }>(
+        `/missions/${encodeURIComponent(missionId)}`,
+        { method: "DELETE" }
+    );
+}
+
+// Permanently deletes every mission. Refused while a simulation is running.
+export async function deleteAllMissions(): Promise<{ deleted_missions: number }> {
+    return request<{ deleted_missions: number }>("/missions", { method: "DELETE" });
+}
+
 export async function getMissionReport(
     missionId: string
 ): Promise<MissionReport> {

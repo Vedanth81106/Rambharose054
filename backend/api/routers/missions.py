@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+import requests
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from api.dependencies import (
@@ -19,6 +21,7 @@ from api.schemas import (
     MissionReportResponse,
     BaselineResponse,
 )
+from telemetry.models import IngestionEvent, Telemetry
 from telemetry.repository import TelemetryRepository
 from twin import baseline
 from twin.report import build_report
@@ -28,6 +31,7 @@ from twin.service import (
     RPM_ROUGHNESS_LIMIT,
     VIBRATION_RMS_LIMIT,
 )
+from twin.models import HealthSnapshot
 from twin.repository import HealthSnapshotRepository
 
 
@@ -50,6 +54,62 @@ def list_missions(
             for mid in mission_ids
         ]
     )
+
+
+SIMULATION_CONTROLLER_URL = "http://host.docker.internal:9000"
+
+
+def _running_mission() -> str | None:
+    """Mission the simulator is running now, or None. Unreachable counts as
+    not running: the controller is down, so nothing is being simulated."""
+
+    try:
+        status = requests.get(f"{SIMULATION_CONTROLLER_URL}/simulation/status", timeout=3).json()
+    except (requests.RequestException, ValueError):
+        return None
+    return status.get("mission_id") if status.get("status") == "running" else None
+
+
+def _delete_missions(session: Session, mission_ids: list[str]) -> int:
+    for model in (HealthSnapshot, IngestionEvent, Telemetry):
+        session.execute(delete(model).where(model.mission_id.in_(mission_ids)))
+    session.commit()
+    return len(mission_ids)
+
+
+@router.delete("/missions")
+def delete_all_missions(
+    session: Session = Depends(get_session),
+    telemetry_repo: TelemetryRepository = Depends(get_telemetry_repo),
+):
+    """Permanently delete every mission (a fresh start)."""
+
+    running = _running_mission()
+    if running:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Mission {running} is running. Stop the simulation before deleting data.",
+        )
+    return {"deleted_missions": _delete_missions(session, telemetry_repo.get_distinct_missions(session))}
+
+
+@router.delete("/missions/{mission_id}")
+def delete_mission(
+    mission_id: str,
+    session: Session = Depends(get_session),
+    telemetry_repo: TelemetryRepository = Depends(get_telemetry_repo),
+):
+    """Permanently delete one mission's telemetry, health snapshots and
+    ingestion events."""
+
+    if mission_id not in telemetry_repo.get_distinct_missions(session):
+        raise MissionNotFoundError(mission_id)
+    if _running_mission() == mission_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Mission {mission_id} is running. Stop the simulation before deleting it.",
+        )
+    return {"deleted_missions": _delete_missions(session, [mission_id])}
 
 
 @router.get(

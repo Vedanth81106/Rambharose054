@@ -221,10 +221,12 @@ class DigitalTwinService:
         fault = self.fault_model.predict(samples)
         rul = self.rul_model.predict(samples)
 
-        # A countdown needs a confirmed fault: on healthy flight the trained
-        # RUL model occasionally dips below the cap (3 % of healthy test
-        # samples read < 400 s), which would raise a false advisory.
-        if rul is not None and not fault.is_anomaly and rul.rul_seconds < RUL_CAP_S:
+        # A countdown needs a confirmed engine fault: on healthy flight the
+        # trained RUL model occasionally dips below the cap (3 % of healthy
+        # test samples read < 400 s), which would raise a false advisory, and
+        # a failing CHT sensor misreads the engine without endangering it.
+        no_engine_fault = not fault.is_anomaly or fault.fault_family == "cht_sensor"
+        if rul is not None and no_engine_fault and rul.rul_seconds < RUL_CAP_S:
             rul = RULResult(rul_seconds=RUL_CAP_S, source=rul.source)
 
         # Once the failure definition is met (twin/failure.py), RUL is 0:

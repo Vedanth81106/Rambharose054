@@ -111,6 +111,7 @@ All REST routes are under `/api`.
 | `GET /missions`, `/missions/{id}/telemetry`, `/missions/{id}/replay` | Mission history and replay |
 | `GET /missions/{id}/report` | Mission-wise health report (outcome, faults, advisories, maintenance) |
 | `GET /missions/{id}/baseline` | Expected healthy readings per sample (healthy baseline) and the derived-metric health limits, for the analysis charts |
+| `DELETE /missions/{id}`, `DELETE /missions` | Permanently delete one mission or all missions (refused while a simulation is running); the analysis page's RESET DATA button |
 | `WS /ws/engines/{id}?mission_id=…` | Live telemetry and health stream |
 
 ## Development
