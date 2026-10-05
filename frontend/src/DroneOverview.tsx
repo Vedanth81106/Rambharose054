@@ -279,27 +279,28 @@ function TelemetryCell({
         value,
         unit,
         color = "#fff",
-        warn = false
     }: {
         label: string;
         value: string | number;
         unit: string;
         color?: string;
-        warn?: boolean;
     }) {
+    // Plain readouts: fixed cruise limits turned healthy hot-weather or
+    // high-altitude readings red. Health judgement (per profile) lives in
+    // the subsystem scores, the advisory and the models.
     return (
         <div
             className="px-4 py-3"
             style={{
-                border: `1px solid ${warn ? "rgba(232,84,63,0.5)" : "#3a3a3a"}`,
+                border: "1px solid #3a3a3a",
                 borderRadius: 6,
-                background: warn ? "rgba(232,84,63,0.07)" : "#0a0a0a",
+                background: "#0a0a0a",
             }}
         >
             <div
                 className="text-xs mb-1.5 font-semibold"
                 style={{
-                    color: warn ? "#e8543f" : "#c0c0c0",
+                    color: "#c0c0c0",
                     fontFamily: "'JetBrains Mono', monospace",
                     letterSpacing: 1,
                 }}
@@ -431,17 +432,17 @@ export default function DroneOverviewSection({ liveTelemetry, advisory }: { live
 
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                         <TelemetryCell label="TIME" value={timeStr} unit="" color="#3b82f6" />
-                                        <TelemetryCell label="TORQUE" value={torque} unit="N·m"  warn={parseFloat(torque) < 7.0}/>
-                                        <TelemetryCell label="FUEL FLOW" value={fuelFlow} unit="kg/h" warn={parseFloat(fuelFlow) < 2.0}/>
-                                        <TelemetryCell label="VIBRATION" value={vibration} unit="g" warn={parseFloat(vibration) > 5}
+                                        <TelemetryCell label="TORQUE" value={torque} unit="N·m"/>
+                                        <TelemetryCell label="FUEL FLOW" value={fuelFlow} unit="kg/h"/>
+                                        <TelemetryCell label="VIBRATION" value={vibration} unit="g"
                                         />
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                        <TelemetryCell label="CHT" value={cht} unit="°C" warn={cht > 110} />
-                                        <TelemetryCell label="EGT" value={egt} unit="°C" warn={egt > 850} />
-                                        <TelemetryCell label="OIL TEMP" value={oilTemp} unit="°C" warn={oilTemp > 120}/>
-                                        <TelemetryCell label="OIL PRESSURE" value={oilPressure} unit="psi" warn={parseFloat(oilPressure) < 40}/>
+                                        <TelemetryCell label="CHT" value={cht} unit="°C" />
+                                        <TelemetryCell label="EGT" value={egt} unit="°C" />
+                                        <TelemetryCell label="OIL TEMP" value={oilTemp} unit="°C"/>
+                                        <TelemetryCell label="OIL PRESSURE" value={oilPressure} unit="psi"/>
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -449,13 +450,11 @@ export default function DroneOverviewSection({ liveTelemetry, advisory }: { live
                                             label="BATTERY VOLTAGE"
                                             value={formatOptional(batteryVoltage, 2)}
                                             unit="V"
-                                            warn={batteryVoltage != null && batteryVoltage < 27.0}
                                         />
                                         <TelemetryCell
                                             label="ALTERNATOR CURRENT"
                                             value={formatOptional(alternatorCurrent, 1)}
                                             unit="A"
-                                            warn={alternatorCurrent != null && alternatorCurrent < 9.0}
                                         />
                                         <TelemetryCell
                                             label="INJECTION TIMING"

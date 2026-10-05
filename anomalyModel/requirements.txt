@@ -1,6 +1,0 @@
-pydantic
-scikit-learn
-xgboost
-joblib
-numpy
-tensorflow

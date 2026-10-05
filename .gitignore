@@ -54,3 +54,7 @@ simulation/.controller.pid
 rul-model-new/rul/rul_data/
 anomaly-model-new/v2/model_data/
 *.zip
+
+# Demo video work files
+demo_video/
+*.mp4
