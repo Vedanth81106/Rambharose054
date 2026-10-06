@@ -58,3 +58,8 @@ anomaly-model-new/v2/model_data/
 # Demo video work files
 demo_video/
 *.mp4
+
+# Local-only files (presentation, demo video, Simulink build cache)
+video_and_ppt/
+Rambharose.pptx
+simulation/slprj/
