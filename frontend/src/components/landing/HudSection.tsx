@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
     AlertTriangle,
-    Wifi,
 } from "lucide-react";
 
 import {
@@ -45,19 +44,6 @@ function formatDuration(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = Math.round(seconds % 60);
     return m > 0 ? `${m} min ${s} s` : `${s} s`;
-}
-
-// Prediction source is "<fault model>+<RUL model>" (backend/twin/predictor.py);
-// the rule-based stand-ins are labelled so a trained model is never assumed.
-const STAND_INS = ["rules", "health-trend"];
-
-function describeSource(source: string): string {
-    const [fault, rul] = source.split("+");
-    const part = (label: string, name?: string) =>
-        name
-            ? `${label} ${name.toUpperCase()} (${STAND_INS.includes(name) ? "RULE-BASED STAND-IN" : "TRAINED MODEL"})`
-            : null;
-    return [part("FAULT:", fault), part("RUL:", rul)].filter(Boolean).join(" · ");
 }
 
 function formatRul(prediction: {
@@ -657,7 +643,7 @@ export default function HudSection({
                                         </div>
                                     </div>
 
-                                    <div className="col-span-2">
+                                    <div>
                                         <div style={{ color: "#777" }}>
                                             ESTIMATED RUL
                                         </div>
@@ -670,7 +656,7 @@ export default function HudSection({
                                         </div>
                                     </div>
 
-                                    <div className="col-span-2">
+                                    <div>
                                         <div style={{ color: "#777" }}>
                                             SIGNALS BEHIND THE CALL
                                         </div>
@@ -685,18 +671,14 @@ export default function HudSection({
                                                     .map(([name]) => SIGNAL_LABEL[name] ?? name)
                                                     .join(", ")}
                                         </div>
-
-                                        {!noData && engineData.prediction.source && (
-                                            <div className="mt-2 text-xs" style={{ color: "#666" }}>
-                                                {describeSource(engineData.prediction.source)}
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             </div>
 
                         </div>
+                    </div>
 
+                    <div className="md:col-span-3 flex flex-col gap-6">
                         <div style={{ border: "1px solid #3a3a3a", background: "#0e0e0e" }} className="p-4">
                             <div className="mb-3 flex items-center justify-between" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
                                 <span className="text-base font-bold" style={{ color: "#fff" }}>SUBSYSTEM HEALTH SCORES</span>
@@ -719,54 +701,6 @@ export default function HudSection({
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="md:col-span-3 flex flex-col gap-6">
-                        
-
-                        <div style={{ border: "1px solid #3a3a3a", background: "#0e0e0e" }} className="p-4">
-                            <div className="flex items-center justify-between mb-3" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                                <span className="text-base font-bold" style={{ color: "#fff" }}>ACTIVE ALERTS</span>
-                                <span className="text-sm font-semibold" style={{ color: "#e8c34a" }}>{engineData.alerts.length} DETECTED</span>
-                            </div>
-                            <div
-                                className="flex flex-col gap-2 overflow-y-auto"
-                                style={{
-                                    maxHeight: "468px",
-                                    scrollbarWidth: "thin",
-                                }}
-                            >
-                                {engineData.alerts.map((al, idx) => {
-                                    const isEngine = al.source === "operating_state";
-                                    return (
-                                        <div
-                                            key={idx}
-                                            className="flex items-start justify-between gap-3 p-3 rounded"
-                                            style={{
-                                                border: isEngine ? "1px solid rgba(232,84,63,0.4)" : "1px solid rgba(127,212,255,0.4)",
-                                                background: isEngine ? "rgba(232,84,63,0.08)" : "rgba(127,212,255,0.08)",
-                                            }}
-                                        >
-                                            <div className="flex items-start gap-2.5">
-                                                {isEngine ? (
-                                                    <AlertTriangle size={16} className="shrink-0 mt-0.5" color="#e8543f" />
-                                                ) : (
-                                                    <Wifi size={16} className="shrink-0 mt-0.5" color="#7fd4ff" />
-                                                )}
-                                                <div>
-                                                    <div className="font-bold text-sm" style={{ color: isEngine ? "#fff" : "#7fd4ff" }}>
-                                                        {al.message}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <span className="text-xs shrink-0" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#b0b0b0" }}>
-                                                {al.timestamp}
-                                            </span>
-                                        </div>
-                                    );
-                                })}
                             </div>
                         </div>
                     </div>
